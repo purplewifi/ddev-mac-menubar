@@ -100,12 +100,11 @@ jobs:
             -name "*.xpc"       -o \
             -name "*.app"       -o \
             -name "*.dylib"     \
-          \) | python3 -c "
-import sys
-paths = [l.rstrip() for l in sys.stdin]
-paths.sort(key=lambda p: -p.count('/'))
-print('\n'.join(paths))
-" | while read -r f; do
+          \) \
+          | awk '{print split($0, a, "/"), $0}' \
+          | sort -rn \
+          | sed 's/^[0-9]* //' \
+          | while read -r f; do
             echo "  signing: $f"
             codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
           done
