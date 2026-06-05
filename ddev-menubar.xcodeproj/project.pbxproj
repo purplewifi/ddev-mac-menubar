@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E70F323B2FD2EEA300979F73 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E70F323A2FD2EEA300979F73 /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		E70F31DF2FD2BF8F00979F73 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -29,9 +33,22 @@
 		E70F31E82FD2BF8F00979F73 /* ddev-menubarUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "ddev-menubarUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		E70F32382FD2EE6800979F73 /* Exceptions for "ddev-menubar" folder in "ddev-menubar" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = E70F31CE2FD2BF8B00979F73 /* ddev-menubar */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		E70F31D12FD2BF8B00979F73 /* ddev-menubar */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				E70F32382FD2EE6800979F73 /* Exceptions for "ddev-menubar" folder in "ddev-menubar" target */,
+			);
 			path = "ddev-menubar";
 			sourceTree = "<group>";
 		};
@@ -52,6 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E70F323B2FD2EEA300979F73 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +130,7 @@
 			);
 			name = "ddev-menubar";
 			packageProductDependencies = (
+				E70F323A2FD2EEA300979F73 /* Sparkle */,
 			);
 			productName = "ddev-menubar";
 			productReference = E70F31CF2FD2BF8B00979F73 /* ddev-menubar.app */;
@@ -195,6 +214,9 @@
 			);
 			mainGroup = E70F31C62FD2BF8B00979F73;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				E70F32392FD2EEA300979F73 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E70F31D02FD2BF8B00979F73 /* Products */;
 			projectDirPath = "";
@@ -397,6 +419,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ddev-menubar/Info.plist";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
@@ -427,6 +450,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "ddev-menubar/Info.plist";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
@@ -587,6 +611,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		E70F32392FD2EEA300979F73 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E70F323A2FD2EEA300979F73 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E70F32392FD2EEA300979F73 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = E70F31C72FD2BF8B00979F73 /* Project object */;
 }

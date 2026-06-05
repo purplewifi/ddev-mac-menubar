@@ -3,10 +3,12 @@ import SwiftUI
 @main
 struct ddev_menubarApp: App {
     @State private var store = DdevProjectStore()
+    @StateObject private var updater = UpdaterController()
 
     var body: some Scene {
         MenuBarExtra {
             MenuBarView(store: store)
+                .environmentObject(updater)
         } label: {
             menuBarLabel
         }

@@ -7,6 +7,7 @@ name: Build and Release
 #   KEYCHAIN_PASSWORD         - Any strong random string (used for the temp CI keychain)
 #   APPLE_ID                  - Your Apple ID email (for notarization)
 #   APPLE_ID_PASSWORD         - App-specific password from appleid.apple.com (not your main password)
+#   SPARKLE_PRIVATE_KEY       - Ed25519 private key from running Sparkle's generate_keys tool
 
 on:
   push:
@@ -16,9 +17,13 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install create-dmg
         run: brew install create-dmg
@@ -43,6 +48,9 @@ jobs:
 
       - name: Build archive
         run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+
           xcodebuild archive \
             -project ddev-menubar.xcodeproj \
             -scheme ddev-menubar \
@@ -50,7 +58,9 @@ jobs:
             -archivePath "$RUNNER_TEMP/ddev-menubar.xcarchive" \
             CODE_SIGN_IDENTITY="Developer ID Application" \
             DEVELOPMENT_TEAM=K6RX8VV4R4 \
-            CODE_SIGN_STYLE=Manual
+            CODE_SIGN_STYLE=Manual \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$VERSION"
 
       - name: Export .app
         run: |
@@ -111,3 +121,33 @@ jobs:
             --title "${{ github.ref_name }}" \
             --generate-notes \
             "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg"
+
+      - name: Generate appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          SPARKLE_VERSION=2.6.4
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" \
+            | tar -xJ -C "$RUNNER_TEMP/sparkle"
+
+          echo "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle_key"
+
+          mkdir -p "$RUNNER_TEMP/appcast-input"
+          cp "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg" "$RUNNER_TEMP/appcast-input/"
+
+          "$RUNNER_TEMP/sparkle/bin/generate_appcast" \
+            --ed-key-file "$RUNNER_TEMP/sparkle_key" \
+            --download-url-prefix "https://github.com/purplewifi/ddev-mac-menubar/releases/download/${{ github.ref_name }}/" \
+            --link "https://github.com/purplewifi/ddev-mac-menubar" \
+            "$RUNNER_TEMP/appcast-input/"
+
+          cp "$RUNNER_TEMP/appcast-input/appcast.xml" appcast.xml
+
+      - name: Commit appcast
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add appcast.xml
+          git diff --staged --quiet || git commit -m "Update appcast for ${{ github.ref_name }}"
+          git push origin HEAD:main

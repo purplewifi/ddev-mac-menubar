@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @Bindable var store: DdevProjectStore
+    @EnvironmentObject private var updater: UpdaterController
 
     var body: some View {
         VStack(spacing: 0) {
@@ -229,6 +230,11 @@ struct MenuBarView: View {
                 .disabled(store.isLoading || store.isPerformingAction)
 
                 Spacer()
+
+                Button("Check for Updates…") {
+                    updater.checkForUpdates()
+                }
+                .disabled(!updater.canCheckForUpdates)
 
                 Button("Quit") {
                     NSApplication.shared.terminate(nil)
