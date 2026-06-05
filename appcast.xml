@@ -1,0 +1,15 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>ddev-menubar</title>
+        <item>
+            <title>0.0.10</title>
+            <pubDate>Fri, 05 Jun 2026 12:44:31 +0000</pubDate>
+            <link>https://github.com/purplewifi/ddev-mac-menubar</link>
+            <sparkle:version>0.0.10</sparkle:version>
+            <sparkle:shortVersionString>0.0.10</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/purplewifi/ddev-mac-menubar/releases/download/v0.0.10/ddev-menubar-v0.0.10.dmg" length="1817613" type="application/octet-stream" sparkle:edSignature="dSPdT3XJvk0THAl7gPyoop+EFG7yJ35LZDDM3UxLpBZfCcWMZpobQrjf3dtjP/lFf93AfE+TUhRX9pE1U79DCA=="/>
+        </item>
+    </channel>
+</rss>
