@@ -58,7 +58,7 @@ jobs:
             -archivePath "$RUNNER_TEMP/ddev-menubar.xcarchive" \
             CODE_SIGN_IDENTITY="Developer ID Application" \
             DEVELOPMENT_TEAM=K6RX8VV4R4 \
-            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_STYLE=Automatic \
             ENABLE_HARDENED_RUNTIME=YES \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$VERSION"
@@ -75,7 +75,7 @@ jobs:
               <key>teamID</key>
               <string>K6RX8VV4R4</string>
               <key>signingStyle</key>
-              <string>manual</string>
+              <string>automatic</string>
           </dict>
           </plist>
           EOF
