@@ -1,32 +1,31 @@
-//
-//  ddev_menubarApp.swift
-//  ddev-menubar
-//
-//  Created by Alan Farquharson on 05/06/2026.
-//
-
 import SwiftUI
-import SwiftData
 
 @main
 struct ddev_menubarApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @State private var store = DdevProjectStore()
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        MenuBarExtra {
+            MenuBarView(store: store)
+        } label: {
+            menuBarLabel
         }
-        .modelContainer(sharedModelContainer)
+        .menuBarExtraStyle(.window)
+
+        WindowGroup(for: LogSession.self) { $session in
+            if let session {
+                LogViewerView(session: session)
+            }
+        }
+        .defaultSize(width: 780, height: 520)
+    }
+
+    @ViewBuilder
+    private var menuBarLabel: some View {
+        if store.runningCount > 0 {
+            Label("DDEV", systemImage: "shippingbox.fill")
+        } else {
+            Label("DDEV", systemImage: "shippingbox")
+        }
     }
 }
