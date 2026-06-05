@@ -2,6 +2,17 @@ import AppKit
 import Foundation
 import Observation
 
+@MainActor
+private final class StartupProgressSink {
+    weak var store: DdevProjectStore?
+
+    nonisolated func receive(_ line: DdevLogLine) {
+        DispatchQueue.main.async { [weak self] in
+            self?.store?.ingestStartupLogLine(line)
+        }
+    }
+}
+
 enum MainTab: String, CaseIterable, Identifiable {
     case groups = "Groups"
     case projects = "Projects"
@@ -20,12 +31,18 @@ final class DdevProjectStore {
     private(set) var isEditingGroup = false
     private(set) var editingGroup: DdevProjectGroup?
     private(set) var isLoading = false
+    private(set) var isRefreshing = false
     private(set) var isPerformingAction = false
+    private(set) var activityMessage: String?
     private(set) var statusMessage: String?
     private(set) var lastRefreshed: Date?
     private(set) var ddevAvailable: Bool
     private(set) var pendingLogSession: LogSession?
     private(set) var logOpenNonce = 0
+    private(set) var actionReport: DdevActionReport?
+    private(set) var startupProgress: StartupProgress?
+    private(set) var isMenuPresented = false
+    private(set) var isAppActive = NSApplication.shared.isActive
 
     var mainTab: MainTab = .projects
     var searchText = "" {
@@ -36,19 +53,89 @@ final class DdevProjectStore {
     private let cli: DdevCLI
     private let groupRepository: ProjectGroupRepository
     private let terminalLauncher: TerminalLauncher
+    private let notifications: NotificationService
     private var refreshTask: Task<Void, Never>?
     private var detailTask: Task<Void, Never>?
+    private var refreshInProgress = false
+    private var startupProgressSink: StartupProgressSink?
+    private var appActivityObservers: [NSObjectProtocol] = []
 
     init(
         cli: DdevCLI = .shared,
         groupRepository: ProjectGroupRepository = ProjectGroupRepository(),
-        terminalLauncher: TerminalLauncher = TerminalLauncher()
+        terminalLauncher: TerminalLauncher = TerminalLauncher(),
+        notifications: NotificationService = .shared
     ) {
         self.cli = cli
         self.groupRepository = groupRepository
         self.terminalLauncher = terminalLauncher
+        self.notifications = notifications
         self.ddevAvailable = cli.isAvailable
         self.groups = groupRepository.load()
+        startObservingAppActivity()
+    }
+
+    var shouldNotifyForBackgroundEvents: Bool {
+        !isMenuPresented
+    }
+
+    var ddevExecutablePath: String? {
+        cli.executablePath
+    }
+
+    func setMenuPresented(_ presented: Bool) {
+        isMenuPresented = presented
+    }
+
+    private func startObservingAppActivity() {
+        let center = NotificationCenter.default
+
+        appActivityObservers = [
+            center.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.isAppActive = true
+                    self?.syncMenuPresentedFromWindows()
+                }
+            },
+            center.addObserver(
+                forName: NSApplication.didResignActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.isAppActive = false
+                    self?.syncMenuPresentedFromWindows()
+                }
+            },
+            center.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.syncMenuPresentedFromWindows()
+                }
+            },
+            center.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.syncMenuPresentedFromWindows()
+                }
+            },
+        ]
+    }
+
+    private func syncMenuPresentedFromWindows() {
+        isMenuPresented = NSApp.windows.contains { window in
+            window.isVisible && window.isKind(of: NSPanel.self)
+        }
     }
 
     var filteredProjects: [DdevProject] {
@@ -180,8 +267,12 @@ final class DdevProjectStore {
             return
         }
 
-        await performAction("Starting \(group.name)…") {
-            try await cli.startProjects(names)
+        await performProjectAction(
+            "Starting \(group.name)…",
+            projectNames: names,
+            progressKind: .start
+        ) { onLine in
+            try await cli.startProjects(names, parallel: true, onLine: onLine)
         }
     }
 
@@ -192,8 +283,12 @@ final class DdevProjectStore {
             return
         }
 
-        await performAction("Stopping \(group.name)…") {
-            try await cli.stopProjects(names)
+        await performProjectAction(
+            "Stopping \(group.name)…",
+            projectNames: names,
+            progressKind: .stop
+        ) { onLine in
+            try await cli.stopProjects(names, parallel: true, onLine: onLine)
         }
     }
 
@@ -206,8 +301,12 @@ final class DdevProjectStore {
             return
         }
 
-        await performAction("Restarting \(group.name)…") {
-            try await cli.restartProjects(names)
+        await performProjectAction(
+            "Restarting \(group.name)…",
+            projectNames: names,
+            progressKind: .restart
+        ) { onLine in
+            try await cli.restartProjects(names, parallel: true, onLine: onLine)
         }
     }
 
@@ -251,34 +350,66 @@ final class DdevProjectStore {
         refreshTask = nil
     }
 
-    func refreshProjects() async {
+    func refreshProjects(showActivity: Bool = false) async {
+        await refreshProjects(
+            activityMessage: showActivity ? "Refreshing projects…" : nil
+        )
+    }
+
+    private func refreshProjects(activityMessage: String?) async {
         ddevAvailable = cli.isAvailable
         guard ddevAvailable else {
             statusMessage = "DDEV not found. Expected at /opt/homebrew/bin/ddev or /usr/local/bin/ddev."
             projects = []
+            self.activityMessage = nil
             return
         }
 
-        if isLoading { return }
+        guard !refreshInProgress else { return }
 
-        isLoading = true
-        defer { isLoading = false }
+        refreshInProgress = true
+        let isInitialLoad = projects.isEmpty
+        if isInitialLoad {
+            isLoading = true
+        } else {
+            isRefreshing = true
+            if let activityMessage {
+                self.activityMessage = activityMessage
+            }
+        }
+        defer {
+            refreshInProgress = false
+            isLoading = false
+            isRefreshing = false
+            if activityMessage != nil {
+                self.activityMessage = nil
+            }
+        }
 
         do {
-            projects = try await cli.listProjects()
+            let fetched = try await cli.listProjects()
+            applyProjects(fetched)
             lastRefreshed = .now
-            statusMessage = nil
+
+            if statusMessage?.hasPrefix("DDEV not found") != true {
+                statusMessage = nil
+            }
 
             if let selectedProjectName,
                projects.contains(where: { $0.name == selectedProjectName }) {
                 await loadDetail(for: selectedProjectName)
-            } else {
+            } else if selectedProjectName != nil {
                 selectedProjectName = nil
                 selectedDetail = nil
             }
         } catch {
             statusMessage = error.localizedDescription
         }
+    }
+
+    private func applyProjects(_ fetched: [DdevProject]) {
+        guard fetched != projects else { return }
+        projects = fetched
     }
 
     func selectProject(_ name: String?) {
@@ -298,20 +429,32 @@ final class DdevProjectStore {
     }
 
     func startProject(_ name: String) async {
-        await performAction("Starting \(name)…") {
-            try await cli.startProject(name)
+        await performProjectAction(
+            "Starting \(name)…",
+            projectNames: [name],
+            progressKind: .start
+        ) { onLine in
+            try await cli.startProjects([name], onLine: onLine)
         }
     }
 
     func stopProject(_ name: String) async {
-        await performAction("Stopping \(name)…") {
-            try await cli.stopProject(name)
+        await performProjectAction(
+            "Stopping \(name)…",
+            projectNames: [name],
+            progressKind: .stop
+        ) { onLine in
+            try await cli.stopProjects([name], onLine: onLine)
         }
     }
 
     func restartProject(_ name: String) async {
-        await performAction("Restarting \(name)…") {
-            try await cli.restartProject(name)
+        await performProjectAction(
+            "Restarting \(name)…",
+            projectNames: [name],
+            progressKind: .restart
+        ) { onLine in
+            try await cli.restartProjects([name], onLine: onLine)
         }
     }
 
@@ -344,6 +487,20 @@ final class DdevProjectStore {
         openInTerminal("ddev ssh \(name.shellSingleQuoted)", workingDirectory: approot)
     }
 
+    func authSSHInTerminal() {
+        let keychain = "\(NSHomeDirectory())/Library/Keychains/login.keychain-db"
+        openInTerminal(
+            """
+            security unlock-keychain \(keychain.shellSingleQuoted) 2>/dev/null || security unlock-keychain login.keychain 2>/dev/null || true
+            ddev auth ssh
+            """
+        )
+    }
+
+    func dismissActionReport() {
+        actionReport = nil
+    }
+
     func requestLogs(for name: String, approot: String, projectType: String? = nil) {
         pendingLogSession = LogSession(
             projectName: name,
@@ -363,6 +520,12 @@ final class DdevProjectStore {
         openInTerminal("ddev logs -f \(name.shellSingleQuoted)", workingDirectory: approot)
     }
 
+    func ingestStartupLogLine(_ line: DdevLogLine) {
+        guard var progress = startupProgress else { return }
+        DdevFriendlyLog.apply(line, to: &progress)
+        startupProgress = progress
+    }
+
     private func loadDetail(for name: String) async {
         do {
             selectedDetail = try await cli.describeProject(name)
@@ -373,15 +536,305 @@ final class DdevProjectStore {
 
     private func performAction(_ progressMessage: String, action: () async throws -> Void) async {
         isPerformingAction = true
-        statusMessage = progressMessage
-        defer { isPerformingAction = false }
+        activityMessage = progressMessage
+        statusMessage = nil
+        defer {
+            isPerformingAction = false
+            if statusMessage == nil {
+                activityMessage = nil
+            }
+        }
 
         do {
             try await action()
-            statusMessage = nil
-            await refreshProjects()
+            await refreshProjects(activityMessage: "Updating projects…")
         } catch {
+            activityMessage = nil
             statusMessage = error.localizedDescription
         }
+    }
+
+    private func performProjectAction(
+        _ progressMessage: String,
+        projectNames: [String],
+        progressKind: StartupProgress.Kind,
+        action: (_ onLine: (@Sendable (DdevLogLine) -> Void)?) async throws -> DdevActionOutput
+    ) async {
+        isPerformingAction = true
+        activityMessage = nil
+        statusMessage = nil
+        actionReport = nil
+        let progressSink = StartupProgressSink()
+        startupProgressSink = progressSink
+        progressSink.store = self
+        startupProgress = DdevFriendlyLog.initialProgress(
+            title: progressMessage.replacingOccurrences(of: "…", with: ""),
+            projectNames: projectNames,
+            kind: progressKind
+        )
+        defer {
+            isPerformingAction = false
+            startupProgressSink = nil
+            if statusMessage == nil {
+                startupProgress = nil
+            }
+            if statusMessage == nil, actionReport == nil {
+                activityMessage = nil
+            }
+        }
+
+        let onLine: @Sendable (DdevLogLine) -> Void = { line in
+            progressSink.receive(line)
+        }
+
+        do {
+            let output = try await action(onLine)
+            syncMenuPresentedFromWindows()
+            if var progress = startupProgress, !progress.isFinished {
+                DdevFriendlyLog.markRemainingComplete(&progress)
+                startupProgress = progress
+            }
+            activityMessage = "Updating projects…"
+            await refreshProjects(activityMessage: "Updating projects…")
+            syncMenuPresentedFromWindows()
+
+            if progressKind == .stop {
+                if !output.errors.isEmpty {
+                    statusMessage = output.errors.joined(separator: "\n")
+                } else {
+                    statusMessage = nil
+                    activityMessage = nil
+                }
+                return
+            }
+
+            var messages: [String] = output.errors
+
+            var serviceIssues: [DdevServiceIssue] = []
+            var logExcerpts: [DdevLogExcerpt] = []
+            var hints: [String] = []
+            var mutagenProblems = false
+
+            for name in projectNames {
+                if let project = projects.first(where: { $0.name == name }),
+                   let mutagenStatus = project.mutagenStatus,
+                   Self.mutagenLooksUnhealthy(mutagenStatus) {
+                    mutagenProblems = true
+                    messages.append("\(name): Mutagen — \(mutagenStatus)")
+                }
+
+                guard let detail = try? await cli.describeProject(name) else { continue }
+
+                if !cli.projectLooksHealthy(detail) {
+                    messages.append("\(name): status is \(detail.statusDesc)")
+                }
+
+                let issues = cli.serviceIssues(for: detail)
+                serviceIssues.append(contentsOf: issues)
+
+                for issue in issues.prefix(2) {
+                    if let snippet = try? await cli.logsSnippet(
+                        projectName: name,
+                        service: issue.serviceName,
+                        tail: 30
+                    ), !snippet.isEmpty {
+                        logExcerpts.append(
+                            DdevLogExcerpt(
+                                projectName: name,
+                                serviceName: issue.serviceName,
+                                text: snippet
+                            )
+                        )
+                    }
+                }
+            }
+
+            let notRunning = projectNames.filter { name in
+                projects.first(where: { $0.name == name })?.isRunning != true
+            }
+
+            let hasRealProblems = !notRunning.isEmpty
+                || !serviceIssues.isEmpty
+                || mutagenProblems
+
+            hints.append(contentsOf: Self.hints(
+                for: serviceIssues,
+                messages: messages,
+                mutagenProblems: mutagenProblems
+            ))
+
+            if hasRealProblems {
+                let title = progressMessage.replacingOccurrences(of: "…", with: "")
+                actionReport = DdevActionReport(
+                    title: "\(title) — issues detected",
+                    projectNames: projectNames,
+                    messages: messages,
+                    serviceIssues: serviceIssues,
+                    logExcerpts: logExcerpts,
+                    hints: Array(Set(hints)).sorted()
+                )
+                statusMessage = Self.summary(serviceIssues: serviceIssues, messages: messages)
+            } else {
+                statusMessage = nil
+                activityMessage = nil
+            }
+
+            await notifyBasedOnProjectState(
+                projectNames: projectNames,
+                progressKind: progressKind,
+                failureMessage: statusMessage
+            )
+        } catch {
+            activityMessage = nil
+            if var progress = startupProgress {
+                DdevFriendlyLog.apply(
+                    DdevLogLine(level: "error", message: error.localizedDescription),
+                    to: &progress
+                )
+                startupProgress = progress
+            }
+
+            await refreshProjects(activityMessage: nil)
+            syncMenuPresentedFromWindows()
+
+            let runningNames = runningProjectNames(from: projectNames)
+            if runningNames.isEmpty {
+                statusMessage = error.localizedDescription
+            } else {
+                statusMessage = nil
+            }
+
+            await notifyBasedOnProjectState(
+                projectNames: projectNames,
+                progressKind: progressKind,
+                failureMessage: error.localizedDescription
+            )
+        }
+    }
+
+    private func runningProjectNames(from projectNames: [String]) -> [String] {
+        projectNames.filter { name in
+            projects.first(where: { $0.name == name })?.isRunning == true
+        }
+    }
+
+    private func notifyBasedOnProjectState(
+        projectNames: [String],
+        progressKind: StartupProgress.Kind,
+        failureMessage: String?
+    ) async {
+        guard progressKind != .stop, shouldNotifyForBackgroundEvents else { return }
+
+        let running = runningProjectNames(from: projectNames)
+        let notRunning = projectNames.filter { !running.contains($0) }
+
+        if notRunning.isEmpty {
+            await notifyProjectsReady(
+                projectNames: projectNames,
+                restarted: progressKind == .restart
+            )
+            return
+        }
+
+        if running.isEmpty {
+            await notifyProjectsFailed(
+                projectNames: notRunning,
+                restarted: progressKind == .restart,
+                message: failureMessage ?? "Project failed to start."
+            )
+            return
+        }
+
+        await notifyProjectsReady(
+            projectNames: running,
+            restarted: progressKind == .restart
+        )
+        await notifyProjectsFailed(
+            projectNames: notRunning,
+            restarted: progressKind == .restart,
+            message: failureMessage ?? "Some projects failed to start."
+        )
+    }
+
+    private func notifyProjectsReady(projectNames: [String], restarted: Bool) async {
+        let url = startupProgress?.note.flatMap(extractURL(from:))
+            ?? projectNames.compactMap { name in
+                projects.first(where: { $0.name == name })?.primaryURL
+            }.first
+
+        await notifications.notifyProjectsReady(
+            projectNames: projectNames,
+            restarted: restarted,
+            url: url
+        )
+    }
+
+    private func notifyProjectsFailed(
+        projectNames: [String],
+        restarted: Bool,
+        message: String
+    ) async {
+        await notifications.notifyProjectsFailed(
+            projectNames: projectNames,
+            restarted: restarted,
+            message: message
+        )
+    }
+
+    private func extractURL(from note: String) -> String? {
+        let pattern = #"https?://[^\s]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: note, range: NSRange(note.startIndex..., in: note)),
+              let range = Range(match.range, in: note) else {
+            return nil
+        }
+        return String(note[range])
+    }
+
+    private static func mutagenLooksUnhealthy(_ status: String) -> Bool {
+        let normalized = status.lowercased()
+        return normalized.contains("fail")
+            || normalized.contains("error")
+            || normalized.contains("nosession")
+    }
+
+    private static func summary(serviceIssues: [DdevServiceIssue], messages: [String]) -> String {
+        if let issue = serviceIssues.first {
+            return "\(issue.projectName): \(issue.serviceName) is \(issue.status)"
+        }
+        if let message = messages.first {
+            let firstLine = message.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? message
+            return String(firstLine.prefix(180))
+        }
+        return "Start completed with issues."
+    }
+
+    private static func hints(
+        for serviceIssues: [DdevServiceIssue],
+        messages: [String],
+        mutagenProblems: Bool
+    ) -> [String] {
+        var hints: [String] = []
+        let combined = (messages + serviceIssues.map { "\($0.serviceName) \($0.status)" })
+            .joined(separator: " ")
+            .lowercased()
+
+        if combined.contains("ssh") || combined.contains("keychain") || combined.contains("agent") {
+            hints.append("Try Auth SSH (unlocks keychain and loads keys into ddev-ssh-agent).")
+        }
+
+        if mutagenProblems {
+            hints.append("Mutagen issues can pause projects — try `ddev mutagen st <project>` or `ddev mutagen reset <project>`.")
+        }
+
+        if serviceIssues.contains(where: { $0.status == "exited" }) {
+            hints.append("A container exited after start — check the service logs below for crash output.")
+        }
+
+        if !serviceIssues.isEmpty {
+            hints.append("DDEV may report success even when a service fails — inspect logs for the stopped service.")
+        }
+
+        return hints
     }
 }

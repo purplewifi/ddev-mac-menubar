@@ -27,6 +27,7 @@ struct GroupListView: View {
                         }
                     }
                 }
+                .transaction { $0.animation = nil }
                 .frame(maxHeight: 360)
             }
         }

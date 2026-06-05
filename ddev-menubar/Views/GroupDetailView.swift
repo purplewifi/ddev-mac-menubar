@@ -116,6 +116,7 @@ struct GroupDetailView: View {
                     }
                 }
             }
+            .transaction { $0.animation = nil }
             .frame(minHeight: 280, maxHeight: 320)
         }
         .padding(12)

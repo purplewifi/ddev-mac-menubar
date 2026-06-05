@@ -60,6 +60,10 @@ nonisolated struct DdevProjectDetail: Codable, Sendable {
     let services: [String: DdevServiceInfo]?
     let dbinfo: DdevDatabaseInfo?
 
+    var includesDatabaseService: Bool {
+        services?.keys.contains { $0.lowercased() == "db" } ?? false
+    }
+
     enum CodingKeys: String, CodingKey {
         case name
         case approot

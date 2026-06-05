@@ -44,7 +44,7 @@ struct ProjectDetailView: View {
                                     Spacer()
                                     Text(service.status ?? "unknown")
                                         .font(.caption)
-                                        .foregroundStyle(service.status == "running" ? .green : .secondary)
+                                        .foregroundStyle(serviceStatusColor(service.status))
                                 }
                             }
                         }
@@ -189,5 +189,16 @@ struct ProjectDetailView: View {
     private func nonEmpty(_ value: String?) -> String? {
         guard let value, !value.isEmpty else { return nil }
         return value
+    }
+
+    private func serviceStatusColor(_ status: String?) -> Color {
+        switch status {
+        case "running":
+            .green
+        case "exited", "stopped", "paused":
+            .orange
+        default:
+            .secondary
+        }
     }
 }

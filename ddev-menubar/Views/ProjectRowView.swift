@@ -76,6 +76,9 @@ struct ProjectRowView: View {
             Button("SSH") {
                 store.sshIntoProject(project.name, approot: project.approot)
             }
+            Button("Auth SSH") {
+                store.authSSHInTerminal()
+            }
             Button("Logs") {
                 store.requestLogs(
                     for: project.name,

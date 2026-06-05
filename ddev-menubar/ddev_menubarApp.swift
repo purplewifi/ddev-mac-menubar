@@ -5,6 +5,11 @@ struct ddev_menubarApp: App {
     @State private var store = DdevProjectStore()
     @StateObject private var updater = UpdaterController()
 
+    init() {
+        NotificationService.shared.configure()
+        Task { await NotificationService.shared.requestAuthorizationIfNeeded() }
+    }
+
     var body: some Scene {
         MenuBarExtra {
             MenuBarView(store: store)

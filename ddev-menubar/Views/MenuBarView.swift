@@ -4,6 +4,7 @@ struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
     @Bindable var store: DdevProjectStore
     @EnvironmentObject private var updater: UpdaterController
+    @State private var showAppInfo = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,22 +20,63 @@ struct MenuBarView: View {
                 mainContent
             }
 
+            if let startupProgress = store.startupProgress {
+                Divider()
+                StartupProgressView(progress: startupProgress)
+            }
+
+            if let activityMessage = store.activityMessage {
+                Divider()
+                ActionStatusBar(
+                    message: activityMessage,
+                    showsProgress: store.isPerformingAction || store.isRefreshing,
+                    isError: false
+                )
+            } else if store.startupProgress == nil, let statusMessage = store.statusMessage {
+                Divider()
+                ActionStatusBar(
+                    message: statusMessage,
+                    showsProgress: false,
+                    isError: store.actionReport != nil || statusMessage.contains("not found")
+                )
+            }
+
             Divider()
             footer
         }
         .frame(width: 420)
         .frame(minHeight: 520)
         .onAppear {
+            store.setMenuPresented(true)
             store.startAutoRefresh()
-            Task { await store.refreshProjects() }
+            Task {
+                await NotificationService.shared.requestAuthorizationIfNeeded()
+                await store.refreshProjects()
+            }
         }
         .onDisappear {
+            store.setMenuPresented(false)
             store.stopAutoRefresh()
         }
         .onChange(of: store.logOpenNonce) { _, _ in
             guard let session = store.pendingLogSession else { return }
             AppActivation.showLogWindow()
             openWindow(id: "logs", value: session)
+        }
+        .sheet(isPresented: Binding(
+            get: { store.actionReport != nil },
+            set: { if !$0 { store.dismissActionReport() } }
+        )) {
+            if let report = store.actionReport {
+                ActionReportView(store: store, report: report)
+            }
+        }
+        .sheet(isPresented: $showAppInfo) {
+            AppInfoView(
+                ddevAvailable: store.ddevAvailable,
+                ddevPath: store.ddevExecutablePath
+            )
+            .environmentObject(updater)
         }
     }
 
@@ -90,7 +132,7 @@ struct MenuBarView: View {
 
             Spacer()
 
-            if store.isLoading {
+            if store.isLoading && store.projects.isEmpty {
                 ProgressView()
                     .controlSize(.small)
             }
@@ -159,6 +201,7 @@ struct MenuBarView: View {
                     }
                 }
             }
+            .transaction { $0.animation = nil }
         }
         .frame(maxHeight: 360)
     }
@@ -211,15 +254,14 @@ struct MenuBarView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let statusMessage = store.statusMessage {
-                Text(statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            } else if let lastRefreshed = store.lastRefreshed {
-                Text("Updated \(lastRefreshed.formatted(date: .omitted, time: .standard))")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            HStack {
+                if let lastRefreshed = store.lastRefreshed {
+                    Text("Updated \(lastRefreshed.formatted(date: .omitted, time: .standard))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
             }
 
             HStack {
@@ -231,16 +273,23 @@ struct MenuBarView: View {
                 }
 
                 Button("Refresh") {
-                    Task { await store.refreshProjects() }
+                    Task { await store.refreshProjects(showActivity: true) }
                 }
-                .disabled(store.isLoading || store.isPerformingAction)
+                .disabled(store.isLoading || store.isPerformingAction || store.isRefreshing)
+
+                Button("Auth SSH") {
+                    store.authSSHInTerminal()
+                }
+                .disabled(store.isPerformingAction)
 
                 Spacer()
 
-                Button("Check for Updates…") {
-                    updater.checkForUpdates()
+                Button {
+                    showAppInfo = true
+                } label: {
+                    Image(systemName: "info.circle")
                 }
-                .disabled(!updater.canCheckForUpdates)
+                .help("About DDEV Menubar")
 
                 Button("Quit") {
                     NSApplication.shared.terminate(nil)
