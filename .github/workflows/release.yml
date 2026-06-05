@@ -25,9 +25,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install create-dmg
-        run: brew install create-dmg
-
       - name: Import Developer ID certificate
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
@@ -40,11 +37,15 @@ jobs:
           echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
       - name: Build archive
         run: |
@@ -66,28 +67,19 @@ jobs:
       - name: Export .app
         run: |
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
-          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" \
-            | grep "Developer ID Application" | head -1 | awk '{print $2}')
           IDENTITY_NAME=$(security find-identity -v -p codesigning "$KEYCHAIN" \
             | grep "Developer ID Application" | head -1 \
             | sed -E 's/.*"(Developer ID Application[^"]+)".*/\1/')
-          echo "Export signing identity: $IDENTITY_NAME ($IDENTITY)"
+          echo "Export signing identity: $IDENTITY_NAME"
 
-          cat > "$RUNNER_TEMP/ExportOptions.plist" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>developer-id</string>
-              <key>teamID</key>
-              <string>K6RX8VV4R4</string>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>signingCertificate</key>
-              <string>$IDENTITY_NAME</string>
-          </dict>
-          </plist>
+          python3 << EOF
+          import plistlib
+          plistlib.dump({
+              "method": "developer-id",
+              "teamID": "K6RX8VV4R4",
+              "signingStyle": "manual",
+              "signingCertificate": "$IDENTITY_NAME",
+          }, open("$RUNNER_TEMP/ExportOptions.plist", "wb"))
           EOF
 
           xcodebuild -exportArchive \
@@ -95,28 +87,27 @@ jobs:
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
             -exportPath "$RUNNER_TEMP/export"
 
-      - name: Sign app bundle for notarization
-        run: |
-          chmod +x scripts/sign-app-for-release.sh
-          scripts/sign-app-for-release.sh \
-            "$RUNNER_TEMP/export/ddev-menubar.app" \
-            "$RUNNER_TEMP/signing.keychain-db"
-
       - name: Create DMG
         run: |
-          mkdir -p "$RUNNER_TEMP/dmg-staging"
-          cp -r "$RUNNER_TEMP/export/ddev-menubar.app" "$RUNNER_TEMP/dmg-staging/"
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          STAGING="$RUNNER_TEMP/dmg-staging"
+          mkdir -p "$STAGING"
+          ditto "$RUNNER_TEMP/export/ddev-menubar.app" "$STAGING/ddev-menubar.app"
+          ln -s /Applications "$STAGING/Applications"
 
-          create-dmg \
-            --volname "ddev-menubar ${{ github.ref_name }}" \
-            --window-pos 200 120 \
-            --window-size 660 400 \
-            --icon-size 100 \
-            --icon "ddev-menubar.app" 165 185 \
-            --hide-extension "ddev-menubar.app" \
-            --app-drop-link 495 185 \
-            "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg" \
-            "$RUNNER_TEMP/dmg-staging/"
+          xattr -cr "$STAGING/ddev-menubar.app"
+          chmod +x scripts/sign-app-for-release.sh
+          scripts/sign-app-for-release.sh \
+            "$STAGING/ddev-menubar.app" \
+            "$KEYCHAIN"
+
+          # Use hdiutil instead of create-dmg: create-dmg runs Finder AppleScript
+          # that adds metadata to the app bundle, invalidating signatures at notarization.
+          hdiutil create \
+            -volname "ddev-menubar ${{ github.ref_name }}" \
+            -srcfolder "$STAGING" \
+            -ov -format UDZO \
+            "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg"
 
       - name: Notarize DMG
         env:

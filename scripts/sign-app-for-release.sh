@@ -11,7 +11,13 @@ sign() {
   local target="$1"
   shift
   echo "  signing: $target"
-  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$@" "$target"
+  if [ -n "$KEYCHAIN" ]; then
+    codesign --force --keychain "$KEYCHAIN" --options runtime \
+      --timestamp=http://timestamp.apple.com/ts01 --sign "$IDENTITY" "$@" "$target"
+  else
+    codesign --force --options runtime \
+      --timestamp=http://timestamp.apple.com/ts01 --sign "$IDENTITY" "$@" "$target"
+  fi
 }
 
 if [ -n "$KEYCHAIN" ]; then
@@ -24,6 +30,7 @@ fi
 
 if [ -z "$IDENTITY" ]; then
   echo "No Developer ID Application identity found" >&2
+  security find-identity -v -p codesigning ${KEYCHAIN:+"$KEYCHAIN"} >&2 || true
   exit 1
 fi
 
@@ -33,7 +40,6 @@ SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 SPARKLE_B="$SPARKLE/Versions/B"
 
 if [ -d "$SPARKLE" ]; then
-  # Clear the app seal before re-signing nested Sparkle helpers.
   rm -rf "$APP/Contents/_CodeSignature"
 
   for xpc in "$SPARKLE_B"/XPCServices/*.xpc; do
@@ -51,9 +57,11 @@ if [ -d "$SPARKLE" ]; then
     sign "$SPARKLE_B/Updater.app"
   fi
 
+  sign "$SPARKLE_B/Sparkle"
   sign "$SPARKLE"
 fi
 
 sign "$APP"
 
 codesign --verify --strict --verbose=2 "$APP"
+echo "Signature check passed for $APP"
