@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct ProjectRowView: View {
-    @Environment(\.openWindow) private var openWindow
     @Bindable var store: DdevProjectStore
 
     let project: DdevProject
@@ -78,7 +77,11 @@ struct ProjectRowView: View {
                 store.sshIntoProject(project.name, approot: project.approot)
             }
             Button("Logs") {
-                openWindow(value: store.showLogs(for: project.name, approot: project.approot))
+                store.requestLogs(
+                    for: project.name,
+                    approot: project.approot,
+                    projectType: project.type
+                )
             }
             Button("Logs in Terminal") {
                 store.showLogsInTerminal(for: project.name, approot: project.approot)

@@ -14,7 +14,7 @@ struct ddev_menubarApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        WindowGroup(for: LogSession.self) { $session in
+        WindowGroup(id: "logs", for: LogSession.self) { $session in
             if let session {
                 LogViewerView(session: session)
             }

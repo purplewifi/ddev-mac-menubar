@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct ProjectDetailView: View {
-    @Environment(\.openWindow) private var openWindow
     @Bindable var store: DdevProjectStore
 
     let detail: DdevProjectDetail
@@ -97,8 +96,25 @@ struct ProjectDetailView: View {
             if let performanceMode = nonEmpty(detail.performanceMode) {
                 detailRow("Performance", performanceMode)
             }
-            if let xdebugEnabled = detail.xdebugEnabled {
-                detailRow("Xdebug", xdebugEnabled ? "enabled" : "disabled")
+            if detail.xdebugEnabled != nil {
+                GridRow {
+                    Text("Xdebug")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle(
+                        detail.xdebugEnabled == true ? "On" : "Off",
+                        isOn: Binding(
+                            get: { detail.xdebugEnabled == true },
+                            set: { enabled in
+                                Task { await store.setXdebug(for: detail.name, enabled: enabled) }
+                            }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                    .disabled(store.isPerformingAction)
+                }
             }
             if let port = detail.dbinfo?.publishedPort {
                 detailRow("DB Port", String(port))
@@ -129,7 +145,11 @@ struct ProjectDetailView: View {
             Spacer()
 
             Button("Logs") {
-                openWindow(value: store.showLogs(for: detail.name, approot: detail.approot))
+                store.requestLogs(
+                    for: detail.name,
+                    approot: detail.approot,
+                    projectType: detail.type
+                )
             }
 
             Button("SSH") {

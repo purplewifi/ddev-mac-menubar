@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MenuBarView: View {
+    @Environment(\.openWindow) private var openWindow
     @Bindable var store: DdevProjectStore
     @EnvironmentObject private var updater: UpdaterController
 
@@ -29,6 +30,11 @@ struct MenuBarView: View {
         }
         .onDisappear {
             store.stopAutoRefresh()
+        }
+        .onChange(of: store.logOpenNonce) { _, _ in
+            guard let session = store.pendingLogSession else { return }
+            AppActivation.showLogWindow()
+            openWindow(id: "logs", value: session)
         }
     }
 

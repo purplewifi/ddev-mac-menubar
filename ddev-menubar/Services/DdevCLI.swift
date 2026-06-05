@@ -71,6 +71,93 @@ nonisolated struct DdevCLI: Sendable {
         _ = try await runRaw(["restart"] + names + ["-j", "-y"])
     }
 
+    func setXdebug(projectName: String, enabled: Bool) async throws {
+        _ = try await runRaw(["xdebug", enabled ? "on" : "off", projectName, "-j", "-y"])
+    }
+
+    func streamFileLog(
+        projectName: String,
+        path: String,
+        service: String = "web",
+        follow: Bool = true,
+        tail: String? = "100"
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            guard let ddevPath else {
+                continuation.finish(throwing: DdevCLIError.ddevNotFound)
+                return
+            }
+
+            var tailArguments = ["tail"]
+            if follow {
+                tailArguments.append("-f")
+            }
+            if let tail, !tail.isEmpty {
+                tailArguments.append(contentsOf: ["-n", tail])
+            }
+            tailArguments.append(path)
+
+            let process = Process()
+            let arguments = ["exec", "-p", projectName, "-s", service, "--"] + tailArguments
+
+            process.executableURL = URL(fileURLWithPath: ddevPath)
+            process.arguments = arguments
+            process.environment = Self.processEnvironment()
+
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            let handle = pipe.fileHandleForReading
+            var pending = ""
+
+            handle.readabilityHandler = { fileHandle in
+                let data = fileHandle.availableData
+                guard !data.isEmpty else { return }
+                guard let chunk = String(data: data, encoding: .utf8) else { return }
+
+                pending += chunk
+                while let newlineIndex = pending.firstIndex(of: "\n") {
+                    let line = String(pending[..<newlineIndex]) + "\n"
+                    pending.removeSubrange(...newlineIndex)
+                    continuation.yield(line)
+                }
+            }
+
+            process.terminationHandler = { proc in
+                handle.readabilityHandler = nil
+
+                if !pending.isEmpty {
+                    continuation.yield(pending)
+                    pending = ""
+                }
+
+                if proc.terminationStatus == 0 || proc.terminationStatus == 15 {
+                    continuation.finish()
+                } else {
+                    continuation.finish(
+                        throwing: DdevCLIError.commandFailed(
+                            "File log stream exited with code \(proc.terminationStatus)."
+                        )
+                    )
+                }
+            }
+
+            continuation.onTermination = { @Sendable _ in
+                handle.readabilityHandler = nil
+                if process.isRunning {
+                    process.terminate()
+                }
+            }
+
+            do {
+                try process.run()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+    }
+
     func streamLogs(
         projectName: String,
         service: String = "web",

@@ -31,6 +31,25 @@ struct DdevProjectDecodingTests {
     }
 }
 
+struct LogSourceCatalogTests {
+    @Test func includesLaravelLogTab() {
+        let tabs = LogSourceCatalog.tabs(for: "laravel")
+        let labels = tabs.map(\.label)
+
+        #expect(labels.contains("Web"))
+        #expect(labels.contains("DB"))
+        #expect(labels.contains("Laravel"))
+        #expect(labels.contains("Custom"))
+    }
+
+    @Test func omitsFrameworkTabsForGenericProjects() {
+        let tabs = LogSourceCatalog.tabs(for: "php")
+        let labels = tabs.map(\.label)
+
+        #expect(labels == ["Web", "DB", "Custom"])
+    }
+}
+
 struct DdevProjectGroupTests {
     @Test func encodesAndDecodesGroups() throws {
         let group = DdevProjectGroup(name: "Portal stack", projectNames: ["portal", "portal-client"])

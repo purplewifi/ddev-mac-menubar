@@ -24,6 +24,8 @@ final class DdevProjectStore {
     private(set) var statusMessage: String?
     private(set) var lastRefreshed: Date?
     private(set) var ddevAvailable: Bool
+    private(set) var pendingLogSession: LogSession?
+    private(set) var logOpenNonce = 0
 
     var mainTab: MainTab = .projects
     var searchText = "" {
@@ -342,8 +344,19 @@ final class DdevProjectStore {
         openInTerminal("ddev ssh \(name.shellSingleQuoted)", workingDirectory: approot)
     }
 
-    func showLogs(for name: String, approot: String) -> LogSession {
-        LogSession(projectName: name, approot: approot)
+    func requestLogs(for name: String, approot: String, projectType: String? = nil) {
+        pendingLogSession = LogSession(
+            projectName: name,
+            approot: approot,
+            projectType: projectType
+        )
+        logOpenNonce += 1
+    }
+
+    func setXdebug(for name: String, enabled: Bool) async {
+        await performAction(enabled ? "Enabling Xdebug for \(name)…" : "Disabling Xdebug for \(name)…") {
+            try await cli.setXdebug(projectName: name, enabled: enabled)
+        }
     }
 
     func showLogsInTerminal(for name: String, approot: String) {
