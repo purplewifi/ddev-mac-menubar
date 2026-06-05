@@ -76,6 +76,9 @@ jobs:
 
       - name: Create DMG
         run: |
+          mkdir -p "$RUNNER_TEMP/dmg-staging"
+          cp -r "$RUNNER_TEMP/export/ddev-menubar.app" "$RUNNER_TEMP/dmg-staging/"
+
           create-dmg \
             --volname "ddev-menubar ${{ github.ref_name }}" \
             --window-pos 200 120 \
@@ -85,7 +88,7 @@ jobs:
             --hide-extension "ddev-menubar.app" \
             --app-drop-link 495 185 \
             "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg" \
-            "$RUNNER_TEMP/export/"
+            "$RUNNER_TEMP/dmg-staging/"
 
       - name: Notarize DMG
         env:

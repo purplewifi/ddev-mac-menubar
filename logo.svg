@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="top" x1="15" y1="12" x2="85" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7CC4FF"/>
+      <stop offset="100%" stop-color="#4AA8F0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Top face -->
+  <polygon points="50,12 85,31 50,50 15,31" fill="url(#top)"/>
+  <!-- Left face -->
+  <polygon points="15,31 50,50 50,82 15,63" fill="#1A65CC"/>
+  <!-- Right face -->
+  <polygon points="50,50 85,31 85,63 50,82" fill="#2E82E0"/>
+
+  <!-- Tape seam on top face -->
+  <polygon points="47,13 53,13 53,50 47,50" fill="rgba(255,255,255,0.22)"/>
+  <!-- Tape seam between side faces -->
+  <polygon points="49,50 51,50 51,82 49,82" fill="rgba(0,0,0,0.18)"/>
+
+  <!-- Edge highlights -->
+  <polyline points="50,12 85,31 85,63 50,82 15,63 15,31 50,12" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="0.75"/>
+  <line x1="50" y1="12" x2="50" y2="50" stroke="rgba(255,255,255,0.18)" stroke-width="0.75"/>
+  <line x1="15" y1="31" x2="85" y2="31" stroke="rgba(255,255,255,0.12)" stroke-width="0.75"/>
+</svg>
