@@ -1,0 +1,110 @@
+name: Build and Release
+
+# Required GitHub Secrets:
+#   BUILD_CERTIFICATE_BASE64  - Developer ID Application cert (.p12) base64-encoded
+#                               Export from Keychain Access, then: base64 -i cert.p12 | pbcopy
+#   P12_PASSWORD              - Password you set when exporting the .p12
+#   KEYCHAIN_PASSWORD         - Any strong random string (used for the temp CI keychain)
+#   APPLE_ID                  - Your Apple ID email (for notarization)
+#   APPLE_ID_PASSWORD         - App-specific password from appleid.apple.com (not your main password)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Import Developer ID certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      - name: Build archive
+        run: |
+          xcodebuild archive \
+            -project ddev-menubar.xcodeproj \
+            -scheme ddev-menubar \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/ddev-menubar.xcarchive" \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            DEVELOPMENT_TEAM=K6RX8VV4R4 \
+            CODE_SIGN_STYLE=Manual
+
+      - name: Export .app
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>developer-id</string>
+              <key>teamID</key>
+              <string>K6RX8VV4R4</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/ddev-menubar.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export"
+
+      - name: Create DMG
+        run: |
+          create-dmg \
+            --volname "ddev-menubar ${{ github.ref_name }}" \
+            --window-pos 200 120 \
+            --window-size 660 400 \
+            --icon-size 100 \
+            --icon "ddev-menubar.app" 165 185 \
+            --hide-extension "ddev-menubar.app" \
+            --app-drop-link 495 185 \
+            "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg" \
+            "$RUNNER_TEMP/export/"
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+        run: |
+          xcrun notarytool submit "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id K6RX8VV4R4 \
+            --wait
+
+          xcrun stapler staple "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg"
