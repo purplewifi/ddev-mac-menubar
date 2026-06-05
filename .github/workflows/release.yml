@@ -59,6 +59,7 @@ jobs:
             CODE_SIGN_IDENTITY="Developer ID Application" \
             DEVELOPMENT_TEAM=K6RX8VV4R4 \
             CODE_SIGN_STYLE=Manual \
+            ENABLE_HARDENED_RUNTIME=YES \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$VERSION"
 
@@ -105,11 +106,25 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
         run: |
-          xcrun notarytool submit "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg" \
+          SUBMISSION=$(xcrun notarytool submit "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
             --team-id K6RX8VV4R4 \
-            --wait
+            --wait \
+            --output-format json)
+
+          echo "$SUBMISSION"
+          STATUS=$(echo "$SUBMISSION" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+          ID=$(echo "$SUBMISSION" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "Notarization failed with status: $STATUS"
+            xcrun notarytool log "$ID" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_ID_PASSWORD" \
+              --team-id K6RX8VV4R4
+            exit 1
+          fi
 
           xcrun stapler staple "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg"
 
