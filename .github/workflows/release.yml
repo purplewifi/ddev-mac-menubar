@@ -58,7 +58,7 @@ jobs:
             -archivePath "$RUNNER_TEMP/ddev-menubar.xcarchive" \
             CODE_SIGN_IDENTITY="Developer ID Application" \
             DEVELOPMENT_TEAM=K6RX8VV4R4 \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
             ENABLE_HARDENED_RUNTIME=YES \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$VERSION"
@@ -75,7 +75,7 @@ jobs:
               <key>teamID</key>
               <string>K6RX8VV4R4</string>
               <key>signingStyle</key>
-              <string>automatic</string>
+              <string>manual</string>
           </dict>
           </plist>
           EOF
@@ -84,6 +84,30 @@ jobs:
             -archivePath "$RUNNER_TEMP/ddev-menubar.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
             -exportPath "$RUNNER_TEMP/export"
+
+      - name: Re-sign app bundle
+        run: |
+          APP="$RUNNER_TEMP/export/ddev-menubar.app"
+          IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/signing.keychain-db" \
+            | grep "Developer ID Application" | head -1 | awk '{print $2}')
+
+          echo "Signing with identity: $IDENTITY"
+
+          # Sign deepest items first: XPC services inside frameworks
+          find "$APP" -name "*.xpc" | sort -r | while read -r f; do
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
+          done
+
+          # Sign frameworks
+          find "$APP/Contents/Frameworks" -maxdepth 1 -mindepth 1 | sort -r | while read -r f; do
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
+          done
+
+          # Sign the app itself
+          codesign --force --sign "$IDENTITY" --options runtime --timestamp "$APP"
+
+          # Verify
+          codesign --verify --deep --strict --verbose=2 "$APP"
 
       - name: Create DMG
         run: |
