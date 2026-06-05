@@ -65,7 +65,15 @@ jobs:
 
       - name: Export .app
         run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" << 'EOF'
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep "Developer ID Application" | head -1 | awk '{print $2}')
+          IDENTITY_NAME=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep "Developer ID Application" | head -1 \
+            | sed -E 's/.*"(Developer ID Application[^"]+)".*/\1/')
+          echo "Export signing identity: $IDENTITY_NAME ($IDENTITY)"
+
+          cat > "$RUNNER_TEMP/ExportOptions.plist" << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -76,6 +84,8 @@ jobs:
               <string>K6RX8VV4R4</string>
               <key>signingStyle</key>
               <string>manual</string>
+              <key>signingCertificate</key>
+              <string>$IDENTITY_NAME</string>
           </dict>
           </plist>
           EOF
@@ -85,33 +95,12 @@ jobs:
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
             -exportPath "$RUNNER_TEMP/export"
 
-      - name: Re-sign app bundle
+      - name: Sign app bundle for notarization
         run: |
-          APP="$RUNNER_TEMP/export/ddev-menubar.app"
-          IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/signing.keychain-db" \
-            | grep "Developer ID Application" | head -1 | awk '{print $2}')
-          echo "Signing with: $IDENTITY"
-
-          # Sign everything inside the bundle deepest-path-first so nested
-          # items (e.g. frameworks/XPC services inside Sparkle.framework) are
-          # signed before their containing bundle is sealed.
-          find "$APP/Contents" \( \
-            -name "*.framework" -o \
-            -name "*.xpc"       -o \
-            -name "*.app"       -o \
-            -name "*.dylib"     \
-          \) \
-          | awk '{print split($0, a, "/"), $0}' \
-          | sort -rn \
-          | sed 's/^[0-9]* //' \
-          | while read -r f; do
-            echo "  signing: $f"
-            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
-          done
-
-          # Sign the app itself last
-          codesign --force --sign "$IDENTITY" --options runtime --timestamp "$APP"
-          codesign --verify --deep --strict --verbose=2 "$APP"
+          chmod +x scripts/sign-app-for-release.sh
+          scripts/sign-app-for-release.sh \
+            "$RUNNER_TEMP/export/ddev-menubar.app" \
+            "$RUNNER_TEMP/signing.keychain-db"
 
       - name: Create DMG
         run: |
