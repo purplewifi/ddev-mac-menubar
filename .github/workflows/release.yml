@@ -7,7 +7,10 @@ name: Build and Release
 #   KEYCHAIN_PASSWORD         - Any strong random string (used for the temp CI keychain)
 #   APPLE_ID                  - Your Apple ID email (for notarization)
 #   APPLE_ID_PASSWORD         - App-specific password from appleid.apple.com (not your main password)
-#   SPARKLE_PRIVATE_KEY       - Ed25519 private key from running Sparkle's generate_keys tool
+#   SPARKLE_PRIVATE_KEY       - Base64 Ed25519 private key from:
+#                               curl -sL .../Sparkle-2.6.4.tar.xz | tar -xJ
+#                               ./Sparkle/bin/generate_keys -x sparkle_private_key.txt
+#                               (paste the single-line file contents into the secret)
 
 on:
   push:
@@ -154,7 +157,45 @@ jobs:
           curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" \
             | tar -xJ -C "$RUNNER_TEMP/sparkle"
 
-          echo "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle_key"
+          python3 <<'PY'
+          import base64, os, re, sys
+
+          raw = os.environ.get("SPARKLE_PRIVATE_KEY", "")
+          if not raw.strip():
+              sys.exit(
+                  "SPARKLE_PRIVATE_KEY GitHub secret is empty or not set.\n"
+                  "Add it under repo Settings → Secrets and variables → Actions."
+              )
+
+          # Common paste mistakes: quotes, whitespace, PEM headers, plist/XML wrapping.
+          key = raw.strip().strip('"').strip("'")
+          key = "".join(key.split())  # remove all whitespace/newlines
+          key = re.sub(r"^-----BEGIN[^-]+-----", "", key)
+          key = re.sub(r"-----END[^-]+-----$", "", key)
+
+          try:
+              decoded = base64.b64decode(key, validate=True)
+          except Exception:
+              sys.exit(
+                  "SPARKLE_PRIVATE_KEY is not valid base64 after normalization.\n"
+                  "Re-export with: ./Sparkle/bin/generate_keys -x sparkle_private_key.txt\n"
+                  "Paste the single 44-character line into GitHub with NO quotes or extra text.\n"
+                  f"(secret length: {len(raw)} chars after paste)"
+              )
+
+          if len(decoded) not in (32, 96):
+              sys.exit(
+                  f"SPARKLE_PRIVATE_KEY decoded to {len(decoded)} bytes; expected 32 or 96.\n"
+                  "You may have pasted the public SUPublicEDKey instead of the private key,\n"
+                  "or double-base64-encoded the value."
+              )
+
+          # Write normalized key for generate_appcast (avoids shell escaping issues).
+          with open(os.environ["RUNNER_TEMP"] + "/sparkle_key", "w", encoding="utf-8") as f:
+              f.write(key)
+
+          print(f"Sparkle private key OK ({len(decoded)} bytes, {len(key)} base64 chars)")
+          PY
 
           mkdir -p "$RUNNER_TEMP/appcast-input"
           cp "$RUNNER_TEMP/ddev-menubar-${{ github.ref_name }}.dmg" "$RUNNER_TEMP/appcast-input/"
