@@ -90,23 +90,28 @@ jobs:
           APP="$RUNNER_TEMP/export/ddev-menubar.app"
           IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/signing.keychain-db" \
             | grep "Developer ID Application" | head -1 | awk '{print $2}')
+          echo "Signing with: $IDENTITY"
 
-          echo "Signing with identity: $IDENTITY"
-
-          # Sign deepest items first: XPC services inside frameworks
-          find "$APP" -name "*.xpc" | sort -r | while read -r f; do
+          # Sign everything inside the bundle deepest-path-first so nested
+          # items (e.g. frameworks/XPC services inside Sparkle.framework) are
+          # signed before their containing bundle is sealed.
+          find "$APP/Contents" \( \
+            -name "*.framework" -o \
+            -name "*.xpc"       -o \
+            -name "*.app"       -o \
+            -name "*.dylib"     \
+          \) | python3 -c "
+import sys
+paths = [l.rstrip() for l in sys.stdin]
+paths.sort(key=lambda p: -p.count('/'))
+print('\n'.join(paths))
+" | while read -r f; do
+            echo "  signing: $f"
             codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
           done
 
-          # Sign frameworks
-          find "$APP/Contents/Frameworks" -maxdepth 1 -mindepth 1 | sort -r | while read -r f; do
-            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
-          done
-
-          # Sign the app itself
+          # Sign the app itself last
           codesign --force --sign "$IDENTITY" --options runtime --timestamp "$APP"
-
-          # Verify
           codesign --verify --deep --strict --verbose=2 "$APP"
 
       - name: Create DMG
