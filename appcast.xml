@@ -3,13 +3,13 @@
     <channel>
         <title>ddev-menubar</title>
         <item>
-            <title>0.0.12</title>
-            <pubDate>Fri, 05 Jun 2026 19:09:18 +0000</pubDate>
+            <title>0.0.13</title>
+            <pubDate>Mon, 08 Jun 2026 10:34:27 +0000</pubDate>
             <link>https://github.com/purplewifi/ddev-mac-menubar</link>
-            <sparkle:version>0.0.12</sparkle:version>
-            <sparkle:shortVersionString>0.0.12</sparkle:shortVersionString>
+            <sparkle:version>0.0.13</sparkle:version>
+            <sparkle:shortVersionString>0.0.13</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/purplewifi/ddev-mac-menubar/releases/download/v0.0.12/ddev-menubar-v0.0.12.dmg" length="1963523" type="application/octet-stream" sparkle:edSignature="uDRYli1jMRjgfyd5OKRwAQCBwCx0U8QTq0grYN5Xu11ttEKIyUrxuWzd+JT6Ehz2O5NdWlj2fcGMK4/rls2CDQ=="/>
+            <enclosure url="https://github.com/purplewifi/ddev-mac-menubar/releases/download/v0.0.13/ddev-menubar-v0.0.13.dmg" length="1964621" type="application/octet-stream" sparkle:edSignature="uke1k2s1yTYcRZeEyi6uTMGrAmwTv0gN5Q5+VlGBHO+aYP1pixBIhOeM0prJFNOiyBs9qpOONEqO0z6yWK19BQ=="/>
         </item>
     </channel>
 </rss>
