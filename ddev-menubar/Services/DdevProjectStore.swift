@@ -14,8 +14,8 @@ private final class StartupProgressSink {
 }
 
 enum MainTab: String, CaseIterable, Identifiable {
-    case groups = "Groups"
     case projects = "Projects"
+    case groups = "Groups"
 
     var id: String { rawValue }
 }
@@ -43,6 +43,7 @@ final class DdevProjectStore {
     private(set) var startupProgress: StartupProgress?
     private(set) var isMenuPresented = false
     private(set) var isAppActive = NSApplication.shared.isActive
+    private(set) var favouritedProjectNames: Set<String> = []
 
     var mainTab: MainTab = .projects
     var searchText = "" {
@@ -52,6 +53,7 @@ final class DdevProjectStore {
 
     private let cli: DdevCLI
     private let groupRepository: ProjectGroupRepository
+    private let preferencesRepository: PreferencesRepository
     private let terminalLauncher: TerminalLauncher
     private let notifications: NotificationService
     private var refreshTask: Task<Void, Never>?
@@ -63,15 +65,18 @@ final class DdevProjectStore {
     init(
         cli: DdevCLI = .shared,
         groupRepository: ProjectGroupRepository = ProjectGroupRepository(),
+        preferencesRepository: PreferencesRepository = PreferencesRepository(),
         terminalLauncher: TerminalLauncher = TerminalLauncher(),
         notifications: NotificationService = .shared
     ) {
         self.cli = cli
         self.groupRepository = groupRepository
+        self.preferencesRepository = preferencesRepository
         self.terminalLauncher = terminalLauncher
         self.notifications = notifications
         self.ddevAvailable = cli.isAvailable
         self.groups = groupRepository.load()
+        self.favouritedProjectNames = preferencesRepository.loadFavourites()
         startObservingAppActivity()
     }
 
@@ -140,13 +145,27 @@ final class DdevProjectStore {
 
     var filteredProjects: [DdevProject] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return projects }
-
-        return projects.filter { project in
+        let filtered: [DdevProject] = query.isEmpty ? projects : projects.filter { project in
             project.name.localizedCaseInsensitiveContains(query)
                 || project.shortroot.localizedCaseInsensitiveContains(query)
                 || project.approot.localizedCaseInsensitiveContains(query)
         }
+        let favs = filtered.filter { favouritedProjectNames.contains($0.name) }
+        let rest = filtered.filter { !favouritedProjectNames.contains($0.name) }
+        return favs + rest
+    }
+
+    func isFavourite(_ name: String) -> Bool {
+        favouritedProjectNames.contains(name)
+    }
+
+    func toggleFavourite(_ name: String) {
+        if favouritedProjectNames.contains(name) {
+            favouritedProjectNames.remove(name)
+        } else {
+            favouritedProjectNames.insert(name)
+        }
+        preferencesRepository.saveFavourites(favouritedProjectNames)
     }
 
     var runningCount: Int {
@@ -260,6 +279,14 @@ final class DdevProjectStore {
         editingGroup = nil
     }
 
+    func duplicateGroup(_ group: DdevProjectGroup) {
+        let newGroup = DdevProjectGroup(name: "Copy of \(group.name)", projectNames: group.projectNames)
+        selectedGroupID = nil
+        isEditingGroup = true
+        editingGroup = newGroup
+        clearProjectSelection()
+    }
+
     func startGroup(_ group: DdevProjectGroup) async {
         let names = stoppableProjectNames(in: group, running: false)
         guard !names.isEmpty else {
@@ -334,7 +361,7 @@ final class DdevProjectStore {
         editingGroup = nil
     }
 
-    func startAutoRefresh(interval: TimeInterval = 15) {
+    func startAutoRefresh(interval: TimeInterval = 120) {
         refreshTask?.cancel()
         refreshTask = Task {
             try? await Task.sleep(for: .seconds(interval))

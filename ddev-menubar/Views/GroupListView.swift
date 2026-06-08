@@ -136,6 +136,9 @@ struct GroupRowView: View {
             Button("Edit Group…") {
                 store.beginEditGroup(group)
             }
+            Button("Duplicate Group") {
+                store.duplicateGroup(group)
+            }
             Button("Delete Group", role: .destructive) {
                 store.deleteGroup(group)
             }

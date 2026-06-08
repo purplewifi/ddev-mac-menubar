@@ -16,6 +16,12 @@ struct ProjectRowView: View {
                         .font(.body.weight(.medium))
                         .lineLimit(1)
 
+                    if store.isFavourite(project.name) {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .font(.caption2)
+                    }
+
                     Spacer()
 
                     Text(project.statusDesc)
@@ -63,6 +69,12 @@ struct ProjectRowView: View {
                 Button("Start") {
                     Task { await store.startProject(project.name) }
                 }
+            }
+
+            Divider()
+
+            Button(store.isFavourite(project.name) ? "Unfavourite" : "Favourite") {
+                store.toggleFavourite(project.name)
             }
 
             Divider()

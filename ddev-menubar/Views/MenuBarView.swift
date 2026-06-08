@@ -94,6 +94,7 @@ struct MenuBarView: View {
     private var groupsContent: some View {
         if store.isEditingGroup, let group = store.editingGroup {
             GroupEditorView(store: store, group: group)
+                .id(group.id)
         } else if let group = store.selectedGroup {
             GroupDetailView(store: store, group: group)
         } else {
